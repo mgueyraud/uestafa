@@ -98,7 +98,7 @@ function layer(width: number, height: number) {
 }
 
 /** One of the card's own SVGs as an image, with where it sits on the card. */
-async function mark(svg: SVGSVGElement, ink: string, urls: string[]) {
+async function mark(svg: SVGSVGElement, ink: string) {
   const box = svg.viewBox.baseVal;
   const px = (v: string) => (v ? parseFloat(v) : undefined);
   const s = svg.style;
@@ -112,14 +112,9 @@ async function mark(svg: SVGSVGElement, ink: string, urls: string[]) {
   clone.setAttribute("width", String(w * SCALE));
   clone.setAttribute("height", String(h * SCALE));
   clone.style.color = ink;
-  const url = URL.createObjectURL(
-    new Blob([new XMLSerializer().serializeToString(clone)], {
-      type: "image/svg+xml",
-    }),
-  );
-  // Released by the caller once drawn: Safari decodes an SVG image late, and
-  // one whose URL is already gone draws as nothing.
-  urls.push(url);
+  // A data URL, not a blob URL: Safari treats an SVG loaded from a blob as
+  // foreign, and then refuses to export the canvas it was drawn on.
+  const url = `data:image/svg+xml,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`;
   const opacity = s.opacity ? parseFloat(s.opacity) : 1;
   return { image: await loadImage(url), x, y, w, h, opacity };
 }
@@ -171,15 +166,6 @@ function chip(ctx: CanvasRenderingContext2D) {
 }
 
 export async function renderStory(card: StoryCard) {
-  const urls: string[] = [];
-  try {
-    return await drawStory(card, urls);
-  } finally {
-    for (const url of urls) URL.revokeObjectURL(url);
-  }
-}
-
-async function drawStory(card: StoryCard, urls: string[]) {
   const { canvas, ctx } = layer(STORY.width, STORY.height);
   const cardX = (STORY.width - CARD.width * SCALE) / 2;
   const full = { x: 0, y: 0, w: CARD.width, h: CARD.height };
@@ -201,7 +187,7 @@ async function drawStory(card: StoryCard, urls: string[]) {
     Promise.all(
       Array.from(
         card.element.querySelectorAll<SVGSVGElement>(":scope > svg"),
-      ).map((svg) => mark(svg, card.ink, urls)),
+      ).map((svg) => mark(svg, card.ink)),
     ),
     loadImage(card.grainUrl),
     card.drawing ? loadImage(card.drawing.src) : undefined,
@@ -281,7 +267,11 @@ async function drawStory(card: StoryCard, urls: string[]) {
 
   // The laminate's relief, over the print but under the bare metal chip.
   const tile = card.grainTile * card.grainSize;
-  const relief = ctx.createPattern(grain, "repeat")!;
+  // Rasterized first: Safari will not export a canvas that was filled with a
+  // pattern made straight from an SVG image.
+  const raster = layer(grain.width, grain.height);
+  raster.ctx.drawImage(grain, 0, 0);
+  const relief = ctx.createPattern(raster.canvas, "repeat")!;
   relief.setTransform(new DOMMatrix().scale(tile / grain.width));
   ctx.globalCompositeOperation = "soft-light";
   ctx.globalAlpha = card.grain;

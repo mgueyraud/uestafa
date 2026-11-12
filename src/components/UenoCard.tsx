@@ -145,8 +145,8 @@ const CONFIG = {
     // Degrees the card leans under a finger before it is let go.
     lean: [38, 0, 90, 1],
     // A swipe this long (px) or this fast (px/ms) turns it over.
-    swipe: [94, 10, 200, 1],
-    flick: [1.25, 0.05, 2, 0.05],
+    swipe: [36, 10, 200, 1],
+    flick: [0.3, 0.05, 2, 0.05],
     // The spring that carries the turn, or settles the card back.
     stiffness: [245, 20, 600, 5],
     damping: [23, 1, 60, 1],

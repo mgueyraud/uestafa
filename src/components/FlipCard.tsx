@@ -77,8 +77,9 @@ export default function FlipCard({
     id: number;
     x: number;
     y: number;
-    at: number;
     active: boolean;
+    // Where the finger was a moment ago, for its speed at release.
+    trail: { x: number; at: number }[];
   } | null>(null);
   // A swipe that ends on the card must not also open its link.
   const swiped = useRef(false);
@@ -90,14 +91,17 @@ export default function FlipCard({
       id: e.pointerId,
       x: e.clientX,
       y: e.clientY,
-      at: e.timeStamp,
       active: false,
+      trail: [{ x: e.clientX, at: e.timeStamp }],
     };
   };
   const move = (e: PointerEvent<HTMLDivElement>) => {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     const dx = e.clientX - d.x;
+    d.trail.push({ x: e.clientX, at: e.timeStamp });
+    while (d.trail.length > 2 && e.timeStamp - d.trail[0].at > 100)
+      d.trail.shift();
     if (!d.active) {
       // Sideways, and clearly so: otherwise it is a tap or a scroll.
       if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(e.clientY - d.y)) return;
@@ -115,9 +119,15 @@ export default function FlipCard({
     drag.current = null;
     if (!d.active) return;
     const dx = e.clientX - d.x;
-    const speed = dx / Math.max(e.timeStamp - d.at, 1);
+    // Speed over the last tenth of a second, not the whole gesture: a short
+    // flick is fast even when the finger rested on the card first.
+    const from = d.trail[0];
+    const speed = (e.clientX - from.x) / Math.max(e.timeStamp - from.at, 1);
     const far = Math.abs(dx) > m.swipe || Math.abs(speed) > m.flick;
-    if (e.type === "pointerup" && far) turn(dx > 0 ? 1 : -1, speed * 300);
+    // A flick goes the way it was flicked; a slow swipe, the way it travelled.
+    const direction = Math.abs(speed) > m.flick ? speed : dx;
+    if (e.type === "pointerup" && far)
+      turn(direction > 0 ? 1 : -1, speed * 300);
     else settle();
   };
 
