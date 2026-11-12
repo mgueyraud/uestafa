@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type PointerEvent,
   type ReactNode,
@@ -16,6 +17,7 @@ import {
 import { QR_MODULES, QR_SIZE } from "./UenoCardQr";
 import { renderStory, shareStory } from "./UenoCardShare";
 import { useStrings } from "../i18n";
+import FlipCard from "./FlipCard";
 
 /*
  * The ueno debit card, front and back, drawn in portrait the way the card is
@@ -127,6 +129,28 @@ const CONFIG = {
     rotateZ: [0, -180, 180, 1],
     perspective: [1400, 300, 3000, 10],
     gap: [56, 0, 240, 1],
+  },
+  // Turning the single card over on a narrow screen.
+  flip: {
+    // Which layout to show: by screen width, or forced either way.
+    view: {
+      type: "select",
+      options: [
+        { value: "auto", label: "Auto (by width)" },
+        { value: "one", label: "One card, flipping" },
+        { value: "two", label: "Two cards" },
+      ],
+      default: "auto",
+    },
+    // Degrees the card leans under a finger before it is let go.
+    lean: [38, 0, 90, 1],
+    // A swipe this long (px) or this fast (px/ms) turns it over.
+    swipe: [94, 10, 200, 1],
+    flick: [1.25, 0.05, 2, 0.05],
+    // The spring that carries the turn, or settles the card back.
+    stiffness: [245, 20, 600, 5],
+    damping: [23, 1, 60, 1],
+    mass: [2.3, 0.2, 5, 0.1],
   },
 } satisfies DialConfig;
 
@@ -926,6 +950,18 @@ function PillPicker<T extends Option>({
   );
 }
 
+/** Whether a media query matches, kept current as the window changes. */
+function useMediaQuery(query: string) {
+  return useSyncExternalStore(
+    (onChange) => {
+      const media = window.matchMedia(query);
+      media.addEventListener("change", onChange);
+      return () => media.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(query).matches,
+  );
+}
+
 export default function UenoCard() {
   const t = useStrings();
   const dial = useDialKitController("ueno card", CONFIG);
@@ -958,6 +994,9 @@ export default function UenoCard() {
     colors.options.find((c) => c.id === drawingColorId) ?? colors.own;
   // The story image is drawn from the same values as the card on the page.
   const cards = useRef<HTMLDivElement>(null);
+  // Too narrow for both sides: one card, turned over with a swipe.
+  const narrow = useMediaQuery(`(max-width: ${2 * W + 160}px)`);
+  const single = p.flip.view === "auto" ? narrow : p.flip.view === "one";
   const [sharing, setSharing] = useState<
     "idle" | "busy" | "ready" | "saved" | "failed"
   >("idle");
@@ -1021,32 +1060,57 @@ export default function UenoCard() {
   const pose = (flip: 1 | -1) =>
     `rotateX(${p.pose.rotateX}deg) rotateY(${flip * p.pose.rotateY}deg) rotateZ(${flip * p.pose.rotateZ}deg)`;
 
+  // The single card turns by swipe, so it holds still under the pointer: the
+  // light still follows, the card does not tilt or lift.
+  const face = single ? { ...surface, tiltMax: 0, lift: 1 } : surface;
+  // A tap on the single card is too easy to make while swiping, so only the
+  // side-by-side cards open the story.
+  const href = single ? undefined : (person?.href ?? DEFAULT_HREF);
+  const front = (
+    <Front
+      surface={face}
+      transform={pose(1)}
+      drawing={drawing}
+      // The card's own ink already is the matching color.
+      drawingColor={
+        drawingColor === colors.own ? undefined : drawingColor.value
+      }
+      href={href}
+    />
+  );
+  // The back is the same sheet seen from behind, so its sheen mirrors.
+  const back = (
+    <Back
+      surface={{ ...face, angle: -face.angle }}
+      transform={pose(-1)}
+      foil={p.hologram}
+      href={href}
+    />
+  );
+
   return (
     <div className="flex flex-col items-center gap-10 px-2.5 py-10 sm:p-12">
       <style>{POINTER_PROPS}</style>
-      <div
-        ref={cards}
-        // Side by side where there is room; stacked on a phone.
-        className="flex flex-wrap items-center justify-center"
-        style={{ gap: p.pose.gap }}
-      >
-        <Front
-          surface={surface}
-          transform={pose(1)}
-          drawing={drawing}
-          // The card's own ink already is the matching color.
-          drawingColor={
-            drawingColor === colors.own ? undefined : drawingColor.value
-          }
-          href={person?.href ?? DEFAULT_HREF}
-        />
-        {/* The back is the same sheet seen from behind, so its sheen mirrors. */}
-        <Back
-          surface={{ ...surface, angle: -surface.angle }}
-          transform={pose(-1)}
-          foil={p.hologram}
-          href={person?.href ?? DEFAULT_HREF}
-        />
+      <div ref={cards}>
+        {single ? (
+          <FlipCard
+            width={W}
+            height={H}
+            perspective={p.pose.perspective}
+            motion={p.flip}
+            front={front}
+            back={back}
+          />
+        ) : (
+          <div
+            // Forced on a narrow screen, the pair stacks rather than overflowing.
+            className="flex flex-wrap items-center justify-center"
+            style={{ gap: p.pose.gap }}
+          >
+            {front}
+            {back}
+          </div>
+        )}
       </div>
       <div className="flex flex-col items-center gap-5">
         <VariantPicker value={variant} onChange={pick} />
