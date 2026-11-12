@@ -1,0 +1,16 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Inter, the typeface on ueno's own site. */
+  --font-sans: 'Inter Variable', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: #212121;
+  color: #f2f2f2;
+}
