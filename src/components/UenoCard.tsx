@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -957,33 +958,63 @@ export default function UenoCard() {
     colors.options.find((c) => c.id === drawingColorId) ?? colors.own;
   // The story image is drawn from the same values as the card on the page.
   const cards = useRef<HTMLDivElement>(null);
-  const [sharing, setSharing] = useState<"idle" | "busy" | "saved" | "failed">(
-    "idle",
-  );
-  const share = async () => {
+  const [sharing, setSharing] = useState<
+    "idle" | "busy" | "ready" | "saved" | "failed"
+  >("idle");
+  const storyColor =
+    drawingColor === colors.own ? surface.ink : drawingColor.value;
+  const storyInput = {
+    ...surface,
+    grainUrl: GRAIN.slice(5, -2),
+    grainTile: GRAIN_TILE,
+    drawing: drawing && {
+      src: isLight(storyColor) ? drawing.lightInk : drawing.image,
+      color: storyColor,
+    },
+    caption: t.headline,
+  };
+  const storyKey = JSON.stringify(storyInput);
+  /*
+   * The story is drawn ahead of the tap. Safari only opens the share sheet
+   * straight from a tap, and drawing the image first takes long enough for it
+   * to stop counting as one; with the image already made, the sheet opens in
+   * the same breath.
+   */
+  const story = useRef<{ key: string; blob: Promise<Blob> } | null>(null);
+  const prepare = () => {
+    if (story.current?.key === storyKey) return story.current.blob;
     const element = cards.current?.querySelector<HTMLElement>("[role=img]");
-    if (!element) return;
+    if (!element) return Promise.reject(new Error("No card to draw"));
+    const blob = renderStory({ element, ...storyInput });
+    const entry = { key: storyKey, blob };
+    story.current = entry;
+    // A failed drawing is not kept: the next tap tries again.
+    blob.catch(() => {
+      if (story.current === entry) story.current = null;
+    });
+    return blob;
+  };
+  const prepareRef = useRef(prepare);
+  useEffect(() => {
+    prepareRef.current = prepare;
+  });
+  useEffect(() => {
+    // Wait for the choice to settle, and for the card to show it.
+    const id = setTimeout(() => prepareRef.current().catch(() => {}), 300);
+    return () => clearTimeout(id);
+  }, [storyKey]);
+  const share = async () => {
     setSharing("busy");
     try {
-      const color =
-        drawingColor === colors.own ? surface.ink : drawingColor.value;
-      const blob = await renderStory({
-        element,
-        ...surface,
-        grainUrl: GRAIN.slice(5, -2),
-        grainTile: GRAIN_TILE,
-        drawing: drawing && {
-          src: isLight(color) ? drawing.lightInk : drawing.image,
-          color,
-        },
-        caption: t.headline,
-      });
       const result = await shareStory(
-        blob,
+        await prepare(),
         `ueno-${person ? t.people[person.id].toLowerCase() : t.filename}-${variant.id}.png`,
       );
-      setSharing(result === "saved" ? "saved" : "idle");
-    } catch {
+      setSharing(
+        result === "saved" ? "saved" : result === "blocked" ? "ready" : "idle",
+      );
+    } catch (error) {
+      console.error(error);
       setSharing("failed");
     }
   };
@@ -1059,6 +1090,7 @@ export default function UenoCard() {
             className="min-h-[1lh] px-4 text-center text-balance"
           >
             {sharing === "saved" && t.saved}
+            {sharing === "ready" && t.ready}
             {sharing === "failed" && t.failed}
           </span>
         </div>

@@ -98,7 +98,7 @@ function layer(width: number, height: number) {
 }
 
 /** One of the card's own SVGs as an image, with where it sits on the card. */
-async function mark(svg: SVGSVGElement, ink: string) {
+async function mark(svg: SVGSVGElement, ink: string, urls: string[]) {
   const box = svg.viewBox.baseVal;
   const px = (v: string) => (v ? parseFloat(v) : undefined);
   const s = svg.style;
@@ -117,12 +117,11 @@ async function mark(svg: SVGSVGElement, ink: string) {
       type: "image/svg+xml",
     }),
   );
-  try {
-    const opacity = s.opacity ? parseFloat(s.opacity) : 1;
-    return { image: await loadImage(url), x, y, w, h, opacity };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  // Released by the caller once drawn: Safari decodes an SVG image late, and
+  // one whose URL is already gone draws as nothing.
+  urls.push(url);
+  const opacity = s.opacity ? parseFloat(s.opacity) : 1;
+  return { image: await loadImage(url), x, y, w, h, opacity };
 }
 
 function chip(ctx: CanvasRenderingContext2D) {
@@ -172,6 +171,15 @@ function chip(ctx: CanvasRenderingContext2D) {
 }
 
 export async function renderStory(card: StoryCard) {
+  const urls: string[] = [];
+  try {
+    return await drawStory(card, urls);
+  } finally {
+    for (const url of urls) URL.revokeObjectURL(url);
+  }
+}
+
+async function drawStory(card: StoryCard, urls: string[]) {
   const { canvas, ctx } = layer(STORY.width, STORY.height);
   const cardX = (STORY.width - CARD.width * SCALE) / 2;
   const full = { x: 0, y: 0, w: CARD.width, h: CARD.height };
@@ -193,7 +201,7 @@ export async function renderStory(card: StoryCard) {
     Promise.all(
       Array.from(
         card.element.querySelectorAll<SVGSVGElement>(":scope > svg"),
-      ).map((svg) => mark(svg, card.ink)),
+      ).map((svg) => mark(svg, card.ink, urls)),
     ),
     loadImage(card.grainUrl),
     card.drawing ? loadImage(card.drawing.src) : undefined,
@@ -331,6 +339,9 @@ export async function shareStory(blob: Blob, filename: string) {
       // Closing the sheet is not a failure.
       if (error instanceof DOMException && error.name === "AbortError")
         return "cancelled" as const;
+      // The browser no longer counts this as a tap: the next one will work.
+      if (error instanceof DOMException && error.name === "NotAllowedError")
+        return "blocked" as const;
       throw error;
     }
   }
